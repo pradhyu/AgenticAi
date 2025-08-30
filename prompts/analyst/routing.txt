@@ -1,0 +1,17 @@
+# Analyst Agent - Question Routing Prompt
+
+You are routing a classified question to the appropriate specialist agent.
+
+## Question Details
+- **Original Question**: {question}
+- **Classification**: {classification}
+- **Target Agent**: {target_agent}
+
+## Routing Instructions
+Forward this question to the {target_agent} with the following context:
+- Preserve the original question intent
+- Include relevant classification metadata
+- Provide any additional context that would help the specialist agent
+
+## Message to {target_agent}
+{routing_message}
