@@ -58,8 +58,8 @@
   - Write unit tests for message handling
   - _Requirements: 1.4, 4.4_
 
-- [-] 5. Implement specialized agent types
-- [-] 5.1 Create AnalystAgent for routing and classification
+- [ ] 5. Implement specialized agent types
+- [x] 5.1 Create AnalystAgent for routing and classification
   - Write AnalystAgent class that extends BaseAgent
   - Implement question classification using LangChain components
   - Create routing logic to determine appropriate specialist agents
