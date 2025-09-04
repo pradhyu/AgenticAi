@@ -317,7 +317,7 @@ class TestArchitectAgent:
             sender_id="user_001",
             recipient_id="architect_001",
             content="Test message",
-            message_type=MessageType.SYSTEM_NOTIFICATION
+            message_type=MessageType.SYSTEM_MESSAGE
         )
         
         response = architect_agent.process_message(message)
