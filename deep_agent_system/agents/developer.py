@@ -63,8 +63,8 @@ class CodeImplementation:
         self.dependencies = dependencies
         self.setup_instructions = setup_instructions
         self.usage_examples = usage_examples
-        self.test_cases = test_cases  
-  
+        self.test_cases = test_cases
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary format."""
         return {
@@ -85,7 +85,7 @@ class DeveloperAgent(BaseAgent):
         super().__init__(*args, **kwargs)
         
         # Validate that this agent has the required capabilities
-        required_capabilities = [Capability.CODE_GENERATION, Capability.IMPLEMENTATION]
+        required_capabilities = [Capability.CODE_GENERATION]
         for capability in required_capabilities:
             if not self.has_capability(capability):
                 logger.warning(
@@ -194,8 +194,8 @@ class DeveloperAgent(BaseAgent):
             
         except Exception as e:
             logger.error(f"Error retrieving development context: {e}")
-            return None 
-   
+            return None
+    
     def _analyze_development_requirements(
         self,
         question: str,
@@ -378,8 +378,8 @@ class DeveloperAgent(BaseAgent):
                 "Documentation and comments"
             ])
         
-        return requirements    
-
+        return requirements
+    
     def _generate_code_implementation(
         self,
         question: str,
@@ -647,8 +647,8 @@ def utility_function(param1: str, param2: int = 0) -> str:
     return f"{param1}_{param2}"'''
             })
         
-        return code_blocks   
- 
+        return code_blocks
+    
     def _generate_javascript_code(
         self,
         question: str,
@@ -994,9 +994,9 @@ ItemManager.propTypes = {
 export default ItemManager;'''
             })
         
-        return code_blocks    
-   
- def _generate_java_code(
+        return code_blocks
+    
+    def _generate_java_code(
         self,
         question: str,
         analysis: CodeAnalysis,
@@ -1260,9 +1260,9 @@ public class Implementation {{
                     "spring-boot-starter-validation"
                 ])
         
-        return dependencies    
+        return dependencies
     
-def _generate_setup_instructions(self, analysis: CodeAnalysis) -> List[str]:
+    def _generate_setup_instructions(self, analysis: CodeAnalysis) -> List[str]:
         """Generate setup instructions based on analysis."""
         instructions = []
         
@@ -1573,8 +1573,8 @@ describe('API Endpoints', () => {
 });'''
             })
         
-        return test_cases    
-
+        return test_cases
+    
     def _format_development_response(
         self,
         question: str,

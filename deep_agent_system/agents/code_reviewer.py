@@ -101,8 +101,8 @@ class QualityIssue:
             "suggestion": self.suggestion,
         }
 
-cla
-ss CodeReviewResult:
+
+class CodeReviewResult:
     """Complete code review analysis result."""
     
     def __init__(
@@ -147,7 +147,7 @@ class CodeReviewerAgent(BaseAgent):
         super().__init__(*args, **kwargs)
         
         # Validate that this agent has the required capabilities
-        required_capabilities = [Capability.CODE_REVIEW, Capability.QUALITY_ANALYSIS]
+        required_capabilities = [Capability.CODE_REVIEW]
         for capability in required_capabilities:
             if not self.has_capability(capability):
                 logger.warning(
