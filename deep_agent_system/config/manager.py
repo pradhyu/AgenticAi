@@ -11,6 +11,7 @@ from .models import (
     AgentConfig,
     AgentType,
     ModelConfig,
+    LLMProvider,
     RAGConfig,
     DatabaseConfig,
     ChromaDBConfig,
@@ -96,15 +97,184 @@ class ConfigManager:
     
     def _create_model_config(self) -> ModelConfig:
         """Create ModelConfig from environment variables."""
+        # Determine provider from environment
+        provider_str = self._get_env_var("LLM_PROVIDER", "openai").lower()
+        
+        try:
+            provider = LLMProvider(provider_str)
+        except ValueError:
+            raise ConfigurationError(f"Unsupported LLM provider: {provider_str}")
+        
+        # Get provider-specific configuration
+        if provider == LLMProvider.OPENAI:
+            return self._create_openai_config()
+        elif provider == LLMProvider.ANTHROPIC:
+            return self._create_anthropic_config()
+        elif provider == LLMProvider.OPENROUTER:
+            return self._create_openrouter_config()
+        elif provider == LLMProvider.LAMBDA_AI:
+            return self._create_lambda_ai_config()
+        elif provider == LLMProvider.TOGETHER_AI:
+            return self._create_together_ai_config()
+        elif provider == LLMProvider.HUGGINGFACE:
+            return self._create_huggingface_config()
+        elif provider == LLMProvider.OLLAMA:
+            return self._create_ollama_config()
+        elif provider == LLMProvider.CUSTOM:
+            return self._create_custom_config()
+        else:
+            raise ConfigurationError(f"Provider configuration not implemented: {provider}")
+    
+    def _create_openai_config(self) -> ModelConfig:
+        """Create OpenAI-specific ModelConfig."""
         return ModelConfig(
-            provider="openai",  # Currently only OpenAI supported
+            provider=LLMProvider.OPENAI,
             model_name=self._get_env_var("OPENAI_MODEL", "gpt-4-turbo-preview"),
             api_key=self._get_env_var("OPENAI_API_KEY", required=True),
+            base_url=self._get_env_var("OPENAI_BASE_URL"),  # Optional custom endpoint
             temperature=self._get_float_env("OPENAI_TEMPERATURE", 0.7),
             max_tokens=self._get_int_env("OPENAI_MAX_TOKENS", 4000),
             timeout=self._get_int_env("AGENT_TIMEOUT", 300),
             max_retries=self._get_int_env("MAX_RETRIES", 3),
         )
+    
+    def _create_anthropic_config(self) -> ModelConfig:
+        """Create Anthropic-specific ModelConfig."""
+        return ModelConfig(
+            provider=LLMProvider.ANTHROPIC,
+            model_name=self._get_env_var("ANTHROPIC_MODEL", "claude-3-sonnet-20240229"),
+            api_key=self._get_env_var("ANTHROPIC_API_KEY", required=True),
+            base_url=self._get_env_var("ANTHROPIC_BASE_URL"),
+            temperature=self._get_float_env("ANTHROPIC_TEMPERATURE", 0.7),
+            max_tokens=self._get_int_env("ANTHROPIC_MAX_TOKENS", 4000),
+            timeout=self._get_int_env("AGENT_TIMEOUT", 300),
+            max_retries=self._get_int_env("MAX_RETRIES", 3),
+        )
+    
+    def _create_openrouter_config(self) -> ModelConfig:
+        """Create OpenRouter-specific ModelConfig."""
+        return ModelConfig(
+            provider=LLMProvider.OPENROUTER,
+            model_name=self._get_env_var("OPENROUTER_MODEL", "openai/gpt-4-turbo-preview"),
+            api_key=self._get_env_var("OPENROUTER_API_KEY", required=True),
+            base_url=self._get_env_var("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+            temperature=self._get_float_env("OPENROUTER_TEMPERATURE", 0.7),
+            max_tokens=self._get_int_env("OPENROUTER_MAX_TOKENS", 4000),
+            timeout=self._get_int_env("AGENT_TIMEOUT", 300),
+            max_retries=self._get_int_env("MAX_RETRIES", 3),
+            site_url=self._get_env_var("OPENROUTER_SITE_URL"),
+            app_name=self._get_env_var("OPENROUTER_APP_NAME", "Deep Agent System"),
+            extra_headers={
+                "HTTP-Referer": self._get_env_var("OPENROUTER_SITE_URL", ""),
+                "X-Title": self._get_env_var("OPENROUTER_APP_NAME", "Deep Agent System"),
+            }
+        )
+    
+    def _create_lambda_ai_config(self) -> ModelConfig:
+        """Create Lambda AI-specific ModelConfig."""
+        return ModelConfig(
+            provider=LLMProvider.LAMBDA_AI,
+            model_name=self._get_env_var("LAMBDA_AI_MODEL", "hermes-2-pro-llama-3-8b"),
+            api_key=self._get_env_var("LAMBDA_AI_API_KEY", required=True),
+            base_url=self._get_env_var("LAMBDA_AI_BASE_URL", "https://api.lambdalabs.com/v1"),
+            lambda_endpoint=self._get_env_var("LAMBDA_AI_ENDPOINT"),
+            temperature=self._get_float_env("LAMBDA_AI_TEMPERATURE", 0.7),
+            max_tokens=self._get_int_env("LAMBDA_AI_MAX_TOKENS", 4000),
+            timeout=self._get_int_env("AGENT_TIMEOUT", 300),
+            max_retries=self._get_int_env("MAX_RETRIES", 3),
+        )
+    
+    def _create_together_ai_config(self) -> ModelConfig:
+        """Create Together AI-specific ModelConfig."""
+        return ModelConfig(
+            provider=LLMProvider.TOGETHER_AI,
+            model_name=self._get_env_var("TOGETHER_AI_MODEL", "meta-llama/Llama-2-70b-chat-hf"),
+            api_key=self._get_env_var("TOGETHER_AI_API_KEY", required=True),
+            base_url=self._get_env_var("TOGETHER_AI_BASE_URL", "https://api.together.xyz/v1"),
+            temperature=self._get_float_env("TOGETHER_AI_TEMPERATURE", 0.7),
+            max_tokens=self._get_int_env("TOGETHER_AI_MAX_TOKENS", 4000),
+            timeout=self._get_int_env("AGENT_TIMEOUT", 300),
+            max_retries=self._get_int_env("MAX_RETRIES", 3),
+        )
+    
+    def _create_huggingface_config(self) -> ModelConfig:
+        """Create Hugging Face-specific ModelConfig."""
+        return ModelConfig(
+            provider=LLMProvider.HUGGINGFACE,
+            model_name=self._get_env_var("HUGGINGFACE_MODEL", "microsoft/DialoGPT-large"),
+            api_key=self._get_env_var("HUGGINGFACE_API_KEY", required=True),
+            base_url=self._get_env_var("HUGGINGFACE_BASE_URL", "https://api-inference.huggingface.co"),
+            temperature=self._get_float_env("HUGGINGFACE_TEMPERATURE", 0.7),
+            max_tokens=self._get_int_env("HUGGINGFACE_MAX_TOKENS", 4000),
+            timeout=self._get_int_env("AGENT_TIMEOUT", 300),
+            max_retries=self._get_int_env("MAX_RETRIES", 3),
+        )
+    
+    def _create_ollama_config(self) -> ModelConfig:
+        """Create Ollama-specific ModelConfig."""
+        return ModelConfig(
+            provider=LLMProvider.OLLAMA,
+            model_name=self._get_env_var("OLLAMA_MODEL", "llama2"),
+            api_key=None,  # Ollama doesn't require API key
+            ollama_host=self._get_env_var("OLLAMA_HOST", "http://localhost:11434"),
+            base_url=self._get_env_var("OLLAMA_BASE_URL"),
+            temperature=self._get_float_env("OLLAMA_TEMPERATURE", 0.7),
+            max_tokens=self._get_int_env("OLLAMA_MAX_TOKENS", 4000),
+            timeout=self._get_int_env("AGENT_TIMEOUT", 300),
+            max_retries=self._get_int_env("MAX_RETRIES", 3),
+        )
+    
+    def _create_custom_config(self) -> ModelConfig:
+        """Create custom provider ModelConfig."""
+        return ModelConfig(
+            provider=LLMProvider.CUSTOM,
+            model_name=self._get_env_var("CUSTOM_MODEL", required=True),
+            api_key=self._get_env_var("CUSTOM_API_KEY"),
+            base_url=self._get_env_var("CUSTOM_BASE_URL", required=True),
+            temperature=self._get_float_env("CUSTOM_TEMPERATURE", 0.7),
+            max_tokens=self._get_int_env("CUSTOM_MAX_TOKENS", 4000),
+            timeout=self._get_int_env("AGENT_TIMEOUT", 300),
+            max_retries=self._get_int_env("MAX_RETRIES", 3),
+            extra_headers=self._parse_extra_headers(),
+            extra_params=self._parse_extra_params(),
+        )
+    
+    def _parse_extra_headers(self) -> Dict[str, str]:
+        """Parse extra headers from environment variables."""
+        headers = {}
+        headers_str = self._get_env_var("CUSTOM_EXTRA_HEADERS", "")
+        if headers_str:
+            try:
+                import json
+                headers = json.loads(headers_str)
+            except json.JSONDecodeError:
+                # Try simple key=value format
+                for pair in headers_str.split(","):
+                    if "=" in pair:
+                        key, value = pair.split("=", 1)
+                        headers[key.strip()] = value.strip()
+        return headers
+    
+    def _parse_extra_params(self) -> Dict[str, Any]:
+        """Parse extra parameters from environment variables."""
+        params = {}
+        params_str = self._get_env_var("CUSTOM_EXTRA_PARAMS", "")
+        if params_str:
+            try:
+                import json
+                params = json.loads(params_str)
+            except json.JSONDecodeError:
+                # Try simple key=value format
+                for pair in params_str.split(","):
+                    if "=" in pair:
+                        key, value = pair.split("=", 1)
+                        # Try to convert to appropriate type
+                        try:
+                            value = json.loads(value.strip())
+                        except json.JSONDecodeError:
+                            value = value.strip()
+                        params[key.strip()] = value
+        return params
     
     def _create_chromadb_config(self) -> ChromaDBConfig:
         """Create ChromaDBConfig from environment variables."""

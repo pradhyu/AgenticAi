@@ -37,21 +37,60 @@ class LogFormat(str, Enum):
     TEXT = "text"
 
 
+class LLMProvider(str, Enum):
+    """Enumeration of supported LLM providers."""
+    OPENAI = "openai"
+    ANTHROPIC = "anthropic"
+    OPENROUTER = "openrouter"
+    LAMBDA_AI = "lambda_ai"
+    TOGETHER_AI = "together_ai"
+    HUGGINGFACE = "huggingface"
+    OLLAMA = "ollama"
+    CUSTOM = "custom"
+
+
 class ModelConfig(BaseModel):
     """Configuration for LLM models."""
-    provider: str = Field(default="openai", description="LLM provider")
+    provider: LLMProvider = Field(default=LLMProvider.OPENAI, description="LLM provider")
     model_name: str = Field(default="gpt-4-turbo-preview", description="Model name")
-    api_key: str = Field(description="API key for the model provider")
+    api_key: Optional[str] = Field(default=None, description="API key for the model provider")
+    base_url: Optional[str] = Field(default=None, description="Custom base URL for API endpoint")
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Model temperature")
     max_tokens: int = Field(default=4000, gt=0, description="Maximum tokens per response")
     timeout: int = Field(default=300, gt=0, description="Request timeout in seconds")
     max_retries: int = Field(default=3, ge=0, description="Maximum number of retries")
+    
+    # Provider-specific configurations
+    extra_headers: Dict[str, str] = Field(default_factory=dict, description="Additional HTTP headers")
+    extra_params: Dict[str, Any] = Field(default_factory=dict, description="Additional API parameters")
+    
+    # OpenRouter specific
+    site_url: Optional[str] = Field(default=None, description="Site URL for OpenRouter")
+    app_name: Optional[str] = Field(default=None, description="App name for OpenRouter")
+    
+    # Lambda AI specific
+    lambda_endpoint: Optional[str] = Field(default=None, description="Lambda AI endpoint URL")
+    
+    # Ollama specific
+    ollama_host: Optional[str] = Field(default="http://localhost:11434", description="Ollama host URL")
 
     @field_validator('temperature')
     @classmethod
     def validate_temperature(cls, v):
         if not 0.0 <= v <= 2.0:
             raise ValueError('Temperature must be between 0.0 and 2.0')
+        return v
+    
+    @field_validator('api_key')
+    @classmethod
+    def validate_api_key(cls, v, info):
+        # API key is required for most providers except Ollama and some custom setups
+        if hasattr(info, 'data') and 'provider' in info.data:
+            provider = info.data['provider']
+            if provider in [LLMProvider.OLLAMA] and not v:
+                return v  # API key not required for Ollama
+            elif provider != LLMProvider.OLLAMA and not v:
+                raise ValueError(f'API key is required for provider: {provider}')
         return v
 
 
