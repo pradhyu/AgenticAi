@@ -231,17 +231,21 @@ class AgentCoordinator:
             """Execute agent processing within the workflow."""
             try:
                 logger.debug(f"Executing agent node: {agent_id}")
+                logger.debug(f"Current state: {state}")
                 
                 # Update current agent in state
                 state["current_agent"] = agent_id
                 
                 # Get the latest message to process
                 messages = state.get("messages", [])
+                logger.debug(f"Messages in state: {messages}")
+                
                 if not messages:
                     logger.warning(f"No messages to process for agent {agent_id}")
                     return state
                 
                 latest_message = messages[-1]
+                logger.debug(f"Processing message: {latest_message}")
                 
                 # Create a proper Message object for the agent
                 message_content = latest_message.get("content", "")
@@ -356,6 +360,206 @@ class AgentCoordinator:
         # Start with sequential as base, but allow dynamic routing
         self._add_sequential_edges(workflow, agent_sequence)
     
+    async def _execute_coordination_strategy(
+        self,
+        workflow_def: WorkflowDefinition,
+        initial_message: Message,
+        state: WorkflowState,
+    ) -> WorkflowState:
+        """Execute coordination strategy without LangGraph complexity.
+        
+        Args:
+            workflow_def: Workflow definition
+            initial_message: Initial message
+            state: Workflow state
+            
+        Returns:
+            Updated workflow state
+        """
+        try:
+            if workflow_def.coordination_strategy == CoordinationStrategy.SEQUENTIAL:
+                return await self._execute_sequential(workflow_def, initial_message, state)
+            elif workflow_def.coordination_strategy == CoordinationStrategy.PARALLEL:
+                return await self._execute_parallel(workflow_def, initial_message, state)
+            elif workflow_def.coordination_strategy == CoordinationStrategy.HIERARCHICAL:
+                return await self._execute_hierarchical(workflow_def, initial_message, state)
+            elif workflow_def.coordination_strategy == CoordinationStrategy.COLLABORATIVE:
+                return await self._execute_collaborative(workflow_def, initial_message, state)
+            else:
+                raise ValueError(f"Unknown coordination strategy: {workflow_def.coordination_strategy}")
+        
+        except Exception as e:
+            state["status"] = WorkflowStatus.FAILED
+            state["error"] = str(e)
+            return state
+    
+    async def _execute_sequential(
+        self,
+        workflow_def: WorkflowDefinition,
+        initial_message: Message,
+        state: WorkflowState,
+    ) -> WorkflowState:
+        """Execute agents sequentially."""
+        current_message = initial_message
+        
+        for agent_id in workflow_def.agent_sequence:
+            if not self.communication_manager.is_agent_registered(agent_id):
+                logger.error(f"Agent {agent_id} not registered")
+                continue
+            
+            # Get agent and process message
+            agent = self.communication_manager._agents[agent_id]
+            response = agent.process_message(current_message)
+            
+            # Add response to state
+            responses = state.get("responses", [])
+            responses.append({
+                "agent_id": agent_id,
+                "content": response.content,
+                "confidence_score": response.confidence_score,
+                "timestamp": response.timestamp.isoformat(),
+            })
+            state["responses"] = responses
+            
+            # Create next message from response for next agent
+            if response.content:
+                current_message = Message(
+                    sender_id=agent_id,
+                    recipient_id="next_agent",
+                    content=response.content,
+                    message_type=MessageType.AGENT_RESPONSE,
+                )
+        
+        return state
+    
+    async def _execute_parallel(
+        self,
+        workflow_def: WorkflowDefinition,
+        initial_message: Message,
+        state: WorkflowState,
+    ) -> WorkflowState:
+        """Execute agents in parallel."""
+        tasks = []
+        
+        for agent_id in workflow_def.agent_sequence:
+            if not self.communication_manager.is_agent_registered(agent_id):
+                logger.error(f"Agent {agent_id} not registered")
+                continue
+            
+            # Create task for each agent
+            task = asyncio.create_task(self._process_agent_message(agent_id, initial_message))
+            tasks.append((agent_id, task))
+        
+        # Wait for all tasks to complete
+        responses = state.get("responses", [])
+        for agent_id, task in tasks:
+            try:
+                response = await task
+                if response:
+                    responses.append({
+                        "agent_id": agent_id,
+                        "content": response.content,
+                        "confidence_score": response.confidence_score,
+                        "timestamp": response.timestamp.isoformat(),
+                    })
+            except Exception as e:
+                logger.error(f"Error processing agent {agent_id}: {e}")
+        
+        state["responses"] = responses
+        return state
+    
+    async def _execute_hierarchical(
+        self,
+        workflow_def: WorkflowDefinition,
+        initial_message: Message,
+        state: WorkflowState,
+    ) -> WorkflowState:
+        """Execute agents hierarchically (root first, then children)."""
+        if not workflow_def.agent_sequence:
+            return state
+        
+        # First agent is the root
+        root_agent_id = workflow_def.agent_sequence[0]
+        child_agents = workflow_def.agent_sequence[1:]
+        
+        responses = state.get("responses", [])
+        
+        # Process root agent first
+        if self.communication_manager.is_agent_registered(root_agent_id):
+            root_response = await self._process_agent_message(root_agent_id, initial_message)
+            if root_response:
+                responses.append({
+                    "agent_id": root_agent_id,
+                    "content": root_response.content,
+                    "confidence_score": root_response.confidence_score,
+                    "timestamp": root_response.timestamp.isoformat(),
+                })
+                
+                # Create message for child agents based on root response
+                child_message = Message(
+                    sender_id=root_agent_id,
+                    recipient_id="child_agents",
+                    content=root_response.content,
+                    message_type=MessageType.AGENT_RESPONSE,
+                )
+                
+                # Process child agents in parallel
+                child_tasks = []
+                for child_agent_id in child_agents:
+                    if self.communication_manager.is_agent_registered(child_agent_id):
+                        task = asyncio.create_task(self._process_agent_message(child_agent_id, child_message))
+                        child_tasks.append((child_agent_id, task))
+                
+                # Wait for child agents
+                for child_agent_id, task in child_tasks:
+                    try:
+                        child_response = await task
+                        if child_response:
+                            responses.append({
+                                "agent_id": child_agent_id,
+                                "content": child_response.content,
+                                "confidence_score": child_response.confidence_score,
+                                "timestamp": child_response.timestamp.isoformat(),
+                            })
+                    except Exception as e:
+                        logger.error(f"Error processing child agent {child_agent_id}: {e}")
+        
+        state["responses"] = responses
+        return state
+    
+    async def _execute_collaborative(
+        self,
+        workflow_def: WorkflowDefinition,
+        initial_message: Message,
+        state: WorkflowState,
+    ) -> WorkflowState:
+        """Execute agents collaboratively (simplified as sequential for now)."""
+        # For now, implement collaborative as sequential
+        # This can be enhanced later with more complex collaboration logic
+        return await self._execute_sequential(workflow_def, initial_message, state)
+    
+    async def _process_agent_message(self, agent_id: str, message: Message) -> Optional[Response]:
+        """Process a message with a specific agent.
+        
+        Args:
+            agent_id: ID of the agent to process the message
+            message: Message to process
+            
+        Returns:
+            Response from the agent or None if error
+        """
+        try:
+            if not self.communication_manager.is_agent_registered(agent_id):
+                logger.error(f"Agent {agent_id} not registered")
+                return None
+            
+            agent = self.communication_manager._agents[agent_id]
+            return agent.process_message(message)
+            
+        except Exception as e:
+            logger.error(f"Error processing message with agent {agent_id}: {e}")
+            return None
+    
     async def execute_workflow(
         self,
         workflow_id: str,
@@ -404,26 +608,17 @@ class AgentCoordinator:
         self._active_executions[execution_id] = execution
         
         try:
-            # Get or compile the workflow
-            if workflow_id not in self._compiled_workflows:
-                graph = self._create_langgraph_workflow(workflow_def)
-                self._compiled_workflows[workflow_id] = graph.compile()
-            
-            compiled_workflow = self._compiled_workflows[workflow_id]
-            
             # Start execution
             execution.status = WorkflowStatus.RUNNING
             execution.started_at = datetime.utcnow()
             
             logger.info(f"Starting workflow execution: {execution_id}")
             
-            # Execute the workflow with timeout
+            # Execute workflow based on coordination strategy with timeout
             result = await asyncio.wait_for(
-                compiled_workflow.ainvoke(initial_state),
+                self._execute_coordination_strategy(workflow_def, initial_message, initial_state),
                 timeout=workflow_def.timeout
             )
-            
-            logger.debug(f"Workflow result: {result}")
             
             # Update execution with results
             execution.state = result

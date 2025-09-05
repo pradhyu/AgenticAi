@@ -5,6 +5,18 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
 from deep_agent_system.config.models import SystemConfig
+from deep_agent_system.error_handling import (
+    DefaultValueFallback,
+    ErrorHandler,
+    RAGRetrievalRecovery,
+    RetryConfig,
+)
+from deep_agent_system.exceptions import (
+    AgentCommunicationError,
+    AgentNotFoundError,
+    PromptNotFoundError,
+    RAGRetrievalError,
+)
 from deep_agent_system.models.agents import AgentConfig, AgentState, Capability
 from deep_agent_system.models.messages import (
     Context,
@@ -105,7 +117,7 @@ class BaseAgent(ABC):
             The prompt template string
             
         Raises:
-            ValueError: If the prompt is not found
+            PromptNotFoundError: If the prompt is not found
         """
         # First try to get from agent-specific prompts
         prompt = self.config.get_prompt_template(prompt_name)
@@ -116,7 +128,11 @@ class BaseAgent(ABC):
         try:
             return self.prompt_manager.get_prompt(self.agent_type, prompt_name)
         except Exception as e:
-            raise ValueError(f"Prompt '{prompt_name}' not found for agent type '{self.agent_type}': {e}")
+            raise PromptNotFoundError(
+                prompt_name=prompt_name,
+                agent_type=self.agent_type,
+                cause=e,
+            )
     
     def retrieve_context(
         self,
@@ -124,7 +140,7 @@ class BaseAgent(ABC):
         retrieval_type: RetrievalType = RetrievalType.HYBRID,
         k: int = 5
     ) -> Optional[Context]:
-        """Retrieve context using RAG.
+        """Retrieve context using RAG with error handling and fallback.
         
         Args:
             query: The query to search for
@@ -142,30 +158,49 @@ class BaseAgent(ABC):
             logger.debug(f"RAG disabled for agent {self.agent_id}")
             return None
         
-        try:
+        # Create error handler with RAG-specific recovery strategies
+        retry_config = RAGRetrievalRecovery.create_retry_config()
+        fallback_strategy = RAGRetrievalRecovery.create_fallback_strategy()
+        error_handler = ErrorHandler(
+            retry_config=retry_config,
+            fallback_strategy=fallback_strategy,
+        )
+        
+        def _retrieve_context_impl():
             self.state.update_activity(f"Retrieving context for: {query[:50]}...")
             
-            if retrieval_type == RetrievalType.VECTOR:
-                documents = self.rag_manager.retrieve_vector_context(query, k=k)
-                return Context(
+            try:
+                if retrieval_type == RetrievalType.VECTOR:
+                    documents = self.rag_manager.retrieve_vector_context(query, k=k)
+                    return Context(
+                        query=query,
+                        documents=documents,
+                        retrieval_method=RetrievalType.VECTOR
+                    )
+                elif retrieval_type == RetrievalType.GRAPH and self.config.graph_rag_enabled:
+                    graph_data = self.rag_manager.retrieve_graph_context(query)
+                    return Context(
+                        query=query,
+                        graph_data=graph_data,
+                        retrieval_method=RetrievalType.GRAPH
+                    )
+                elif retrieval_type == RetrievalType.HYBRID:
+                    combined_context = self.rag_manager.hybrid_retrieve(query, k=k)
+                    return combined_context
+                else:
+                    logger.warning(f"Unsupported retrieval type: {retrieval_type}")
+                    return None
+                    
+            except Exception as e:
+                raise RAGRetrievalError(
+                    f"Failed to retrieve context for query: {query}",
                     query=query,
-                    documents=documents,
-                    retrieval_method=RetrievalType.VECTOR
+                    retrieval_type=retrieval_type.value,
+                    cause=e,
                 )
-            elif retrieval_type == RetrievalType.GRAPH and self.config.graph_rag_enabled:
-                graph_data = self.rag_manager.retrieve_graph_context(query)
-                return Context(
-                    query=query,
-                    graph_data=graph_data,
-                    retrieval_method=RetrievalType.GRAPH
-                )
-            elif retrieval_type == RetrievalType.HYBRID:
-                combined_context = self.rag_manager.hybrid_retrieve(query, k=k)
-                return combined_context
-            else:
-                logger.warning(f"Unsupported retrieval type: {retrieval_type}")
-                return None
-                
+        
+        try:
+            return error_handler.execute(_retrieve_context_impl)
         except Exception as e:
             logger.error(f"Error retrieving context for agent {self.agent_id}: {e}")
             return None
@@ -173,7 +208,7 @@ class BaseAgent(ABC):
             self.state.clear_task()
     
     def communicate_with_agent(self, agent_id: str, message: Message) -> Optional[Response]:
-        """Send a message to another agent and get a response.
+        """Send a message to another agent and get a response with error handling.
         
         Args:
             agent_id: ID of the target agent
@@ -184,21 +219,42 @@ class BaseAgent(ABC):
         """
         if agent_id not in self._agent_registry:
             logger.error(f"Agent {agent_id} not registered with {self.agent_id}")
-            return None
+            raise AgentNotFoundError(agent_id)
         
         target_agent = self._agent_registry[agent_id]
         
-        try:
+        # Create error handler for agent communication
+        retry_config = RetryConfig(
+            max_attempts=3,
+            base_delay=0.5,
+            retryable_exceptions=[AgentCommunicationError, ConnectionError],
+        )
+        error_handler = ErrorHandler(retry_config=retry_config)
+        
+        def _communicate_impl():
             logger.debug(f"Agent {self.agent_id} sending message to {agent_id}")
-            response = target_agent.process_message(message)
             
-            # Add to conversation history
-            self.conversation_history.add_message(message)
-            if response:
-                self.conversation_history.add_response(response)
-            
-            return response
-            
+            try:
+                response = target_agent.process_message(message)
+                
+                # Add to conversation history
+                self.conversation_history.add_message(message)
+                if response:
+                    self.conversation_history.add_response(response)
+                
+                return response
+                
+            except Exception as e:
+                raise AgentCommunicationError(
+                    f"Failed to communicate with agent {agent_id}",
+                    sender_id=self.agent_id,
+                    recipient_id=agent_id,
+                    message_id=message.id,
+                    cause=e,
+                )
+        
+        try:
+            return error_handler.execute(_communicate_impl)
         except Exception as e:
             logger.error(f"Error communicating with agent {agent_id}: {e}")
             return None

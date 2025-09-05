@@ -7,7 +7,7 @@ from deep_agent_system.agents.tester import (
     TesterAgent, TestCase, TestSuite, TestStrategy, TestingResult
 )
 from deep_agent_system.config.models import SystemConfig
-from deep_agent_system.models.agents import AgentConfig, AgentType, Capability
+from deep_agent_system.models.agents import AgentConfig, AgentType, Capability, LLMConfig
 from deep_agent_system.models.messages import Message, MessageType, Response
 from deep_agent_system.prompts.manager import PromptManager
 from deep_agent_system.rag.manager import RAGManager
@@ -34,7 +34,8 @@ def agent_config():
     return AgentConfig(
         agent_id="tester_test",
         agent_type=AgentType.TESTER,
-        capabilities=[Capability.TEST_CREATION, Capability.QUALITY_ASSURANCE],
+        llm_config=LLMConfig(model_name="gpt-3.5-turbo"),
+        capabilities=[Capability.TEST_CREATION],
         rag_enabled=True,
         graph_rag_enabled=False
     )

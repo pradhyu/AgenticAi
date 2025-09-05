@@ -30,6 +30,8 @@ dependencies = [
     "typer>=0.9.0",
     "openai>=1.0.0",
     "tiktoken>=0.5.0",
+    "pytest>=8.4.1",
+    "pytest-asyncio>=1.1.0",
 ]
 
 [project.optional-dependencies]
@@ -43,7 +45,7 @@ dev = [
 ]
 
 [project.scripts]
-deep-agent = "deep_agent_system.cli:main"
+deep-agent = "deep_agent_system.cli.main:main"
 
 [tool.black]
 line-length = 88

@@ -8,6 +8,13 @@ from typing import Any, Callable, Dict, List, Optional, Set
 from uuid import uuid4
 
 from deep_agent_system.agents.base import BaseAgent
+from deep_agent_system.error_handling import AsyncErrorHandler, RetryConfig
+from deep_agent_system.exceptions import (
+    AgentCommunicationError,
+    AgentNotFoundError,
+    MessageQueueFullError,
+    MessageTimeoutError,
+)
 from deep_agent_system.models.messages import (
     ConversationHistory,
     Message,
@@ -205,7 +212,7 @@ class AgentCommunicationManager:
         wait_for_response: bool = False,
         timeout: Optional[int] = None,
     ) -> Optional[Response]:
-        """Send a message from one agent to another.
+        """Send a message from one agent to another with error handling.
         
         Args:
             sender_id: ID of sending agent
@@ -218,12 +225,17 @@ class AgentCommunicationManager:
             
         Returns:
             Response if wait_for_response is True, None otherwise
+            
+        Raises:
+            AgentNotFoundError: If sender or recipient agent is not registered
+            MessageTimeoutError: If message delivery times out
+            AgentCommunicationError: If message delivery fails
         """
         if sender_id not in self._agents:
-            raise ValueError(f"Sender agent {sender_id} not registered")
+            raise AgentNotFoundError(sender_id)
         
         if recipient_id not in self._agents:
-            raise ValueError(f"Recipient agent {recipient_id} not registered")
+            raise AgentNotFoundError(recipient_id)
         
         # Create message
         message = Message(
@@ -234,37 +246,69 @@ class AgentCommunicationManager:
             metadata=metadata or {},
         )
         
-        start_time = datetime.utcnow()
+        # Create error handler for message delivery
+        retry_config = RetryConfig(
+            max_attempts=3,
+            base_delay=0.5,
+            retryable_exceptions=[
+                AgentCommunicationError,
+                MessageTimeoutError,
+                ConnectionError,
+            ],
+        )
+        error_handler = AsyncErrorHandler(retry_config=retry_config)
+        
+        async def _send_message_impl():
+            start_time = datetime.utcnow()
+            
+            try:
+                # Check queue capacity
+                queue_size = await self._message_queues[recipient_id].size()
+                if queue_size >= self.max_queue_size:
+                    raise MessageQueueFullError(recipient_id, queue_size)
+                
+                # Add to recipient's message queue
+                await self._message_queues[recipient_id].put(message)
+                
+                # Update statistics
+                self._delivery_stats["messages_sent"] += 1
+                
+                # Deliver message to recipient
+                response = await self._deliver_message(message, wait_for_response, timeout)
+                
+                # Update delivery time statistics
+                delivery_time = (datetime.utcnow() - start_time).total_seconds()
+                self._update_delivery_time(delivery_time)
+                
+                self._delivery_stats["messages_delivered"] += 1
+                
+                # Call delivery callbacks
+                for callback in self._delivery_callbacks.get(recipient_id, []):
+                    try:
+                        callback(message, response)
+                    except Exception as e:
+                        logger.error(f"Error in delivery callback: {e}")
+                
+                logger.debug(f"Message {message.id} delivered from {sender_id} to {recipient_id}")
+                return response
+                
+            except (MessageQueueFullError, MessageTimeoutError):
+                # Re-raise specific exceptions without wrapping
+                raise
+            except Exception as e:
+                self._delivery_stats["messages_failed"] += 1
+                raise AgentCommunicationError(
+                    f"Failed to deliver message from {sender_id} to {recipient_id}",
+                    sender_id=sender_id,
+                    recipient_id=recipient_id,
+                    message_id=message.id,
+                    cause=e,
+                )
         
         try:
-            # Add to recipient's message queue
-            await self._message_queues[recipient_id].put(message)
-            
-            # Update statistics
-            self._delivery_stats["messages_sent"] += 1
-            
-            # Deliver message to recipient
-            response = await self._deliver_message(message, wait_for_response, timeout)
-            
-            # Update delivery time statistics
-            delivery_time = (datetime.utcnow() - start_time).total_seconds()
-            self._update_delivery_time(delivery_time)
-            
-            self._delivery_stats["messages_delivered"] += 1
-            
-            # Call delivery callbacks
-            for callback in self._delivery_callbacks.get(recipient_id, []):
-                try:
-                    callback(message, response)
-                except Exception as e:
-                    logger.error(f"Error in delivery callback: {e}")
-            
-            logger.debug(f"Message {message.id} delivered from {sender_id} to {recipient_id}")
-            return response
-            
+            return await error_handler.execute(_send_message_impl)
         except Exception as e:
-            self._delivery_stats["messages_failed"] += 1
-            logger.error(f"Failed to deliver message from {sender_id} to {recipient_id}: {e}")
+            logger.error(f"Failed to send message from {sender_id} to {recipient_id}: {e}")
             raise
     
     async def _deliver_message(
@@ -273,7 +317,7 @@ class AgentCommunicationManager:
         wait_for_response: bool = False,
         timeout: Optional[int] = None,
     ) -> Optional[Response]:
-        """Deliver a message to the recipient agent.
+        """Deliver a message to the recipient agent with error handling.
         
         Args:
             message: Message to deliver
@@ -282,6 +326,10 @@ class AgentCommunicationManager:
             
         Returns:
             Response if wait_for_response is True, None otherwise
+            
+        Raises:
+            MessageTimeoutError: If waiting for response times out
+            AgentCommunicationError: If message processing fails
         """
         recipient_agent = self._agents[message.recipient_id]
         
@@ -306,15 +354,39 @@ class AgentCommunicationManager:
                 logger.error(f"Message {message.id} timed out waiting for response")
                 if not response_future.done():
                     response_future.cancel()
-                raise
+                raise MessageTimeoutError(
+                    timeout_seconds=actual_timeout,
+                    sender_id=message.sender_id,
+                    recipient_id=message.recipient_id,
+                    message_id=message.id,
+                )
+            except Exception as e:
+                logger.error(f"Error processing message {message.id}: {e}")
+                raise AgentCommunicationError(
+                    f"Failed to process message {message.id}",
+                    sender_id=message.sender_id,
+                    recipient_id=message.recipient_id,
+                    message_id=message.id,
+                    cause=e,
+                )
             finally:
                 # Clean up pending response
                 if message.id in self._pending_responses:
                     del self._pending_responses[message.id]
         else:
             # Fire and forget
-            response = recipient_agent.process_message(message)
-            return response
+            try:
+                response = recipient_agent.process_message(message)
+                return response
+            except Exception as e:
+                logger.error(f"Error processing fire-and-forget message {message.id}: {e}")
+                raise AgentCommunicationError(
+                    f"Failed to process message {message.id}",
+                    sender_id=message.sender_id,
+                    recipient_id=message.recipient_id,
+                    message_id=message.id,
+                    cause=e,
+                )
     
     async def broadcast_message(
         self,
