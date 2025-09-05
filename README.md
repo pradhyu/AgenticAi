@@ -9,6 +9,7 @@ A sophisticated multi-agent system using LangChain and LangGraph that intelligen
 - **📚 Dual RAG Integration**: Vector-based (ChromaDB) and graph-based (Neo4j) retrieval
 - **🔄 Dynamic Workflows**: LangGraph-powered multi-agent collaboration
 - **🎨 Rich CLI Interface**: Beautiful command-line interface with syntax highlighting, colored output, and interactive features
+- **🔌 Multi-Provider LLM Support**: Works with OpenAI, Anthropic, OpenRouter, Lambda AI, Together AI, Hugging Face, Ollama, and custom endpoints
 - **⚙️ Configurable Prompts**: Externalized prompts for easy customization
 - **🔧 Hot-Reloadable Configuration**: Update prompts and settings without restart
 - **📊 Comprehensive Monitoring**: Built-in logging and performance metrics
@@ -95,7 +96,7 @@ uv pip install -e ".[dev]"
 Copy the environment template and configure your settings:
 
 ```bash
-cp .env.template .env
+cpgit@github.com:pradhyu/blackbeard-extension.git .env.template .env
 ```
 
 Edit the `.env` file with your configuration (see [Configuration Guide](#-configuration-guide) below).
@@ -124,15 +125,73 @@ The Deep Agent System uses environment variables for configuration. All settings
 
 ### Required Configuration
 
-#### OpenAI API Configuration
-```bash
-# Required: Your OpenAI API key
-OPENAI_API_KEY=sk-your-api-key-here
+#### LLM Provider Configuration
 
-# Optional: Model settings
+The Deep Agent System supports multiple LLM providers. Choose your preferred provider and configure accordingly:
+
+```bash
+# Select your LLM provider
+LLM_PROVIDER=openai  # Options: openai, anthropic, openrouter, lambda_ai, together_ai, huggingface, ollama, custom
+```
+
+**OpenAI Configuration:**
+```bash
+OPENAI_API_KEY=sk-your-api-key-here
 OPENAI_MODEL=gpt-4-turbo-preview
 OPENAI_TEMPERATURE=0.7
 OPENAI_MAX_TOKENS=4000
+OPENAI_BASE_URL=  # Optional: Custom OpenAI-compatible endpoint
+```
+
+**Anthropic Configuration:**
+```bash
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+ANTHROPIC_MODEL=claude-3-sonnet-20240229
+ANTHROPIC_TEMPERATURE=0.7
+ANTHROPIC_MAX_TOKENS=4000
+```
+
+**OpenRouter Configuration:**
+```bash
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+OPENROUTER_MODEL=openai/gpt-4-turbo-preview
+OPENROUTER_SITE_URL=https://yoursite.com  # Optional
+OPENROUTER_APP_NAME=Deep Agent System
+```
+
+**Lambda AI Configuration:**
+```bash
+LAMBDA_AI_API_KEY=your_lambda_ai_api_key_here
+LAMBDA_AI_MODEL=hermes-2-pro-llama-3-8b
+LAMBDA_AI_BASE_URL=https://api.lambdalabs.com/v1
+```
+
+**Together AI Configuration:**
+```bash
+TOGETHER_AI_API_KEY=your_together_ai_api_key_here
+TOGETHER_AI_MODEL=meta-llama/Llama-2-70b-chat-hf
+```
+
+**Hugging Face Configuration:**
+```bash
+HUGGINGFACE_API_KEY=your_huggingface_api_key_here
+HUGGINGFACE_MODEL=microsoft/DialoGPT-large
+```
+
+**Ollama Configuration (Local):**
+```bash
+OLLAMA_MODEL=llama2
+OLLAMA_HOST=http://localhost:11434
+# No API key required for local Ollama
+```
+
+**Custom Provider Configuration:**
+```bash
+CUSTOM_MODEL=your_custom_model_name
+CUSTOM_API_KEY=your_custom_api_key
+CUSTOM_BASE_URL=https://your-custom-endpoint.com/v1
+CUSTOM_EXTRA_HEADERS={"Authorization": "Bearer token"}
+CUSTOM_EXTRA_PARAMS={"top_p": 0.9}
 ```
 
 #### Prompt Directory
@@ -197,6 +256,63 @@ LOG_FORMAT=json
 LOG_FILE=./logs/deep_agent_system.log
 ENABLE_DEBUG_LOGGING=false
 ```
+
+### 🔌 Supported LLM Providers
+
+The Deep Agent System supports multiple LLM providers, allowing you to choose the best option for your needs:
+
+| Provider | Description | API Key Required | Local/Cloud |
+|----------|-------------|------------------|-------------|
+| **OpenAI** | GPT-4, GPT-3.5-turbo models | ✅ | Cloud |
+| **Anthropic** | Claude 3 models (Sonnet, Opus, Haiku) | ✅ | Cloud |
+| **OpenRouter** | Access to 100+ models via unified API | ✅ | Cloud |
+| **Lambda AI** | High-performance inference for open models | ✅ | Cloud |
+| **Together AI** | Open-source models with fast inference | ✅ | Cloud |
+| **Hugging Face** | Inference API for thousands of models | ✅ | Cloud |
+| **Ollama** | Local model inference (Llama, Mistral, etc.) | ❌ | Local |
+| **Custom** | Any OpenAI-compatible API endpoint | Varies | Both |
+
+#### Provider-Specific Features
+
+**OpenAI:**
+- Best-in-class GPT-4 models
+- Function calling support
+- Vision capabilities (GPT-4V)
+
+**Anthropic:**
+- Claude 3 with excellent reasoning
+- Large context windows (up to 200K tokens)
+- Strong safety features
+
+**OpenRouter:**
+- Access to multiple providers through one API
+- Cost optimization across models
+- Real-time model availability
+
+**Lambda AI:**
+- Optimized for open-source models
+- High-performance GPU infrastructure
+- Competitive pricing
+
+**Together AI:**
+- Fast inference for open models
+- Support for fine-tuned models
+- Batch processing capabilities
+
+**Hugging Face:**
+- Thousands of available models
+- Easy model switching
+- Community-driven ecosystem
+
+**Ollama:**
+- Complete privacy (local inference)
+- No API costs
+- Support for quantized models
+
+**Custom:**
+- Use any OpenAI-compatible endpoint
+- Self-hosted models
+- Enterprise deployments
 
 ### Configuration Validation
 
@@ -639,12 +755,41 @@ deep-agent ask "What is Python?"
 deep-agent interactive
 ```
 
+### 🔄 Quick Provider Switching
+
+Switch between different LLM providers easily:
+
+```bash
+# Use OpenAI (default)
+export LLM_PROVIDER=openai
+export OPENAI_API_KEY=sk-your-key-here
+deep-agent ask "Explain machine learning"
+
+# Switch to OpenRouter for access to multiple models
+export LLM_PROVIDER=openrouter
+export OPENROUTER_API_KEY=sk-or-your-key-here
+export OPENROUTER_MODEL=anthropic/claude-3-sonnet
+deep-agent ask "Same question, different model"
+
+# Use Lambda AI for high-performance inference
+export LLM_PROVIDER=lambda_ai
+export LAMBDA_AI_API_KEY=your-lambda-key
+export LAMBDA_AI_MODEL=hermes-2-pro-llama-3-8b
+deep-agent ask "Fast inference with open models"
+
+# Use local Ollama for privacy
+export LLM_PROVIDER=ollama
+export OLLAMA_MODEL=llama2
+deep-agent ask "Completely private, local inference"
+```
+
 **Pro Tips:**
 - Use `Tab` for command completion (where supported)
 - Press `Ctrl+C` to interrupt long operations
 - Use `/debug` in interactive mode for troubleshooting
 - Try different `--format` options for various use cases
 - Use `--verbose` for detailed operation information
+- Test provider configurations with: `python examples/multi_provider_demo.py`
 
 ## 🖥️ CLI Command Reference
 
